@@ -142,26 +142,39 @@ export class Heartbeat {
   denoise() {
     // TODO
   }
-  normalize() {
-    // TODO
-    // meanStdDev
+  standardize(signal) {
+    let mean = new cv.Mat();
+    let stdDev = new cv.Mat();
+    let t1 = new cv.Mat();
+    cv.meanStdDev(signal, mean, stdDev, t1);
+    let means_c3 = cv.matFromArray(1, 1, cv.CV_32FC3, [mean.data64F[0], mean.data64F[1], mean.data64F[2]]);
+    let stdDev_c3 = cv.matFromArray(1, 1, cv.CV_32FC3, [stdDev.data64F[0], stdDev.data64F[1], stdDev.data64F[2]]);
+    let means = new cv.Mat(signal.rows, 1, cv.CV_32FC3);
+    let stdDevs = new cv.Mat(signal.rows, 1, cv.CV_32FC3);
+    cv.repeat(means_c3, signal.rows, 1, means);
+    cv.repeat(stdDev_c3, signal.rows, 1, stdDevs);
+    cv.subtract(signal, means, signal, t1, -1);
+    cv.divide(signal, stdDevs, signal, 1, -1);
+    mean.delete(); stdDev.delete(); t1.delete();
+    means_c3.delete(); stdDev_c3.delete();
+    means.delete(); stdDevs.delete();
   }
   detrend(signal, lambda) {
     let h = cv.Mat.zeros(signal.rows-2, signal.rows, cv.CV_32FC1);
     let i = cv.Mat.eye(signal.rows, signal.rows, cv.CV_32FC1);
-    let t1 = cv.matFromArray(signal.rows-2, 1, cv.CV_32FC1, new Array(3).fill(1));
-    let t2 = cv.matFromArray(signal.rows-2, 1, cv.CV_32FC1, new Array(3).fill(-2));
+    let t1 = cv.Mat.ones(signal.rows-2, 1, cv.CV_32FC1)
+    let t2 = cv.matFromArray(signal.rows-2, 1, cv.CV_32FC1, new Array(signal.rows-2).fill(-2));
     let t3 = new cv.Mat();
     t1.copyTo(h.diag(0)); t2.copyTo(h.diag(1)); t1.copyTo(h.diag(2));
-    cv.gemm(h, h, lambda*lambda, t3, 1, h, cv.GEMM_1_T);
+    cv.gemm(h, h, lambda*lambda, t3, 0, h, cv.GEMM_1_T);
     cv.add(i, h, h, t3, -1);
     cv.invert(h, h, cv.DECOMP_LU);
     cv.subtract(i, h, h, t3, -1);
     let s = new cv.MatVector();
     cv.split(signal, s);
-    cv.gemm(h, s.get(0), 1, t3, 1, s.get(0), 0);
-    cv.gemm(h, s.get(1), 1, t3, 1, s.get(1), 0);
-    cv.gemm(h, s.get(2), 1, t3, 1, s.get(2), 0);
+    cv.gemm(h, s.get(0), 1, t3, 0, s.get(0), 0);
+    cv.gemm(h, s.get(1), 1, t3, 0, s.get(1), 0);
+    cv.gemm(h, s.get(2), 1, t3, 0, s.get(2), 0);
     cv.merge(s, signal);
     h.delete(); i.delete();
     t1.delete(); t2.delete(); t3.delete();
