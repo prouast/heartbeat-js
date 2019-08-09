@@ -61,7 +61,7 @@ export class Heartbeat {
       console.log(e);
     }
     // Set variables
-    self.signal = new cv.Mat(); // 120 x 3 raw rgb values // TODO how will I organise matrices?
+    self.signal = []; // 120 x 3 raw rgb values // TODO how will I organise matrices?
     self.timestamps = []; // 120 x 1 timestamps
     self.rescan = []; // 120 x 1 rescan bool
     // Load face detector
@@ -94,15 +94,16 @@ export class Heartbeat {
       // Update the signal
       if (this.faceValid) {
         // Shift signal buffer
-        while (signal.rows > FPS * WINDOW_SIZE) {
-          push(this.signal); // todo
+        while (this.signal.length > FPS * WINDOW_SIZE) {
+          shift(this.signal);
           shift(this.timestamps);
           shift(this.rescan);
         }
         // New values
         const means = mean(this.frameRGB, mask);
         // Add new values to raw signal buffer
-        this.signal.push_back(means); // todo
+        // TODO make sure means is 3-dim javascript array
+        this.signal.push(means);
         this.timestamps.push(time);
         this.rescan.push(rescanFlag);
       }
@@ -116,16 +117,34 @@ export class Heartbeat {
   // Start every second?
   rppg() {
     // Update fps
-    fps = getFps(t, timeBase);
-    // Update band spectrum limits
-    low = (int)(s.rows * LOW_BPM / SEC_PER_MIN / fps);
-    high = (int)(s.rows * HIGH_BPM / SEC_PER_MIN / fps) + 1;
+    let fps = getFps(t, timeBase);
     // If valid signal is large enough: estimate
-    if ((s.rows >= fps * minSignalSize) {
+    if ((this.signal.length >= fps * minSignalSize) {
+      // Work with cv.Mat from here
+      let signal = this.arrayToMat(this.signal);
       // Filtering
-      extractSignal();
+      //this.denoise(signal);
+      this.standardize(signal);
+      this.detrend(signal, 1);
+      this.movingAverage(signal, 3);
       // HR estimation
-      estimateHeartrate();
+      signal = this.selectGreen(signal);
+      this.timeToFrequency(signal, true);
+      // Calculate band spectrum limits
+      let low = Math.floor(signal.rows * LOW_BPM / SEC_PER_MIN / fps);
+      let high = Math.ceil(signal.rows * HIGH_BPM / SEC_PER_MIN / fps);
+      if (!signal.empty()) {
+        // Mask for infeasible frequencies
+        let bandMask = cv.matFromArray(5, 1, cv.CV_8U, new Array(5).fill(0).fill(1, low, high+1));
+        // Identify feasible frequency with maximum magnitude
+        let result = cv.minMaxLoc(signal, bandMask);
+        bandMask.delete();
+        // Infer BPM
+        let bpm = result.maxLoc.y * fps / signal.rows * SEC_PER_MIN;
+        // TODO update UI with this result
+      }
+      // ...
+      signal.delete();
     }
   }
   detectFace() {
@@ -134,12 +153,12 @@ export class Heartbeat {
   trackFace() {
     // TODO
   }
-  shift(m) {
-    const int length = m.rows;
-    m.rowRange(1, length).copyTo(m.rowRange(0, length - 1));
-    m.pop_back();
+  arrayToMat(signal) {
+    let flatSignal = [].concat.apply([], signal);
+    let length = signal.length/3;
+    return cv.matFromArray(length, 1, cv.CV_32FC3, flatSignal);
   }
-  denoise() {
+  denoise(signal) {
     // TODO
   }
   standardize(signal) {
@@ -183,6 +202,26 @@ export class Heartbeat {
   movingAverage(signal, kernelSize) {
     cv.blur(signal, signal, {height: kernelSize, width: 1});
   }
+  selectGreen(signal) {
+    let rgb = new cv.MatVector();
+    cv.split(signal, rgb);
+    return rgb.get(1);
+  }
+  timeToFrequency(signal, magnitude) {
+    // Prepare planes
+    let planes = new cv.MatVector();
+    planes.push_back(signal);
+    planes.push_back(new cv.Mat.zeros(signal.rows, 1, cv.CV_32F))
+    let powerSpectrum = new cv.Mat();
+    cv.merge(planes, signal);
+    // Fourier transform
+    cv.dft(signal, signal, cv.DFT_COMPLEX_OUTPUT);
+    if (magnitude) {
+      cv.split(signal, planes);
+      cv.magnitude(planes.get(0), planes.get(1), signal);
+    }
+  }
+  // TODO
   stop() {
     console.log("stop" + this.timer);
     clearInterval(this.timer);
