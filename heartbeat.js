@@ -136,7 +136,7 @@ export class Heartbeat {
         }
         // Get mask
         let mask = new cv.Mat();
-        this.makeMask(mask, this.frameGray, this.face);
+        mask = this.makeMask(this.frameGray, this.face);
         // New values
         let means = cv.mean(this.frameRGB, mask);
         mask.delete();
@@ -150,6 +150,7 @@ export class Heartbeat {
         new cv.Point(this.face.x+this.face.width, this.face.y+this.face.height),
         [0, 255, 0, 255]);
       cv.imshow('canvas', this.frameRGB);
+      //mask.delete();
     } catch (e) {
       console.log("Error capturing frame:");
       console.log(e);
@@ -159,7 +160,6 @@ export class Heartbeat {
     let faces = new cv.RectVector();
     this.classifier.detectMultiScale(gray, faces, 1.1, 3, 0);
     if (faces.size() > 0) {
-      console.log("faces");
       this.face = faces.get(0);
       // TODO: Detect tracking corners
       this.faceValid = true;
@@ -169,14 +169,15 @@ export class Heartbeat {
     }
     faces.delete();
   }
-  makeMask(result, frameGray, face) {
-    result = cv.Mat.zeros(frameGray.rows, frameGray.cols, cv.CV_8UC1);
+  makeMask(frameGray, face) {
+    let result = cv.Mat.zeros(frameGray.rows, frameGray.cols, cv.CV_8UC1);
     let white = new cv.Scalar(255, 255, 255, 255);
     let pt1 = new cv.Point(Math.round(face.x + 0.3 * face.width),
       Math.round(face.y + 0.1 * face.height));
     let pt2 = new cv.Point(Math.round(face.x + 0.7 * face.width),
       Math.round(face.y + 0.25 * face.height));
     cv.rectangle(result, pt1, pt2, white, -1);
+    return result;
   }
   invalidateFace() {
     self.signal = [];
@@ -205,6 +206,8 @@ export class Heartbeat {
       this.movingAverage(signal, 3);
       // HR estimation
       signal = this.selectGreen(signal);
+      // Draw time domain signal
+      this.draw(signal);
       this.timeToFrequency(signal, true);
       // Calculate band spectrum limits
       let low = Math.floor(signal.rows * LOW_BPM / SEC_PER_MIN / fps);
@@ -221,7 +224,6 @@ export class Heartbeat {
         console.log(bpm);
         // TODO update UI with this result
       }
-      // ...
       signal.delete();
     }
   }
@@ -304,6 +306,9 @@ export class Heartbeat {
       cv.split(signal, planes);
       cv.magnitude(planes.get(0), planes.get(1), signal);
     }
+  }
+  draw(signal) {
+    // TODO
   }
   // TODO
   stop() {
