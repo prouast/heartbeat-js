@@ -1,11 +1,13 @@
 
 const RESCAN_INTERVAL = 1000;
-const FPS = 10;
+const RPPG_INTERVAL = 1000;
+const DEFAULT_FPS = 10;
 const WINDOW_SIZE = 5;
 const LOW_BPM = 42;
 const HIGH_BPM = 240;
 const REL_MIN_FACE_SIZE = 0.4;
 const SEC_PER_MIN = 60;
+const MSEC_PER_SEC = 1000;
 const MAX_CORNERS = 10;
 const MIN_CORNERS = 5;
 const QUALITY_LEVEL = 0.01;
@@ -90,8 +92,9 @@ export class Heartbeat {
       if (!this.classifier.load(faceCascadeFile)) {
         console.log("Face Cascade not loaded");
       }
-      this.scanTimer = setInterval(this.processFrame.bind(this), 100);
-      this.rppgTimer = setInterval(this.rppg.bind(this), 1000);
+      this.scanTimer = setInterval(this.processFrame.bind(this),
+        MSEC_PER_SEC/DEFAULT_FPS);
+      this.rppgTimer = setInterval(this.rppg.bind(this), RPPG_INTERVAL);
     } catch (e) {
       console.log(e);
     }
@@ -126,7 +129,7 @@ export class Heartbeat {
       if (this.faceValid) {
         //console.log("Update signal");
         // Shift signal buffer
-        while (this.signal.length > FPS * WINDOW_SIZE) {
+        while (this.signal.length > DEFAULT_FPS * WINDOW_SIZE) {
           this.signal.shift();
           this.timestamps.shift();
           this.rescan.shift();
@@ -143,6 +146,9 @@ export class Heartbeat {
         this.rescan.push(rescanFlag);
       }
       // Draw
+      cv.rectangle(this.frameRGB, new cv.Point(this.face.x, this.face.y),
+        new cv.Point(this.face.x+this.face.width, this.face.y+this.face.height),
+        [0, 255, 0, 255]);
       cv.imshow('canvas', this.frameRGB);
     } catch (e) {
       console.log("Error capturing frame:");
@@ -186,13 +192,12 @@ export class Heartbeat {
   rppg() {
     console.log("rppg");
     // Update fps
-    //let fps = getFps(t, timeBase); // TODO
+    let fps = this.getFps(this.timestamps);
     // If valid signal is large enough: estimate
-    if (this.signal.length >= FPS * 5) {
+    if (this.signal.length >= fps * WINDOW_SIZE) {
       // Work with cv.Mat from here
-      let signal = cv.matFromArray(this.signal.length, 1, cv.CV_32FC1,
+      let signal = cv.matFromArray(this.signal.length, 1, cv.CV_32FC3,
         [].concat.apply([], this.signal));
-      console.log(signal);
       // Filtering
       //this.denoise(signal);
       this.standardize(signal);
@@ -206,18 +211,30 @@ export class Heartbeat {
       let high = Math.ceil(signal.rows * HIGH_BPM / SEC_PER_MIN / fps);
       if (!signal.empty()) {
         // Mask for infeasible frequencies
-        let bandMask = cv.matFromArray(5, 1, cv.CV_8U,
-          new Array(5).fill(0).fill(1, low, high+1));
+        let bandMask = cv.matFromArray(signal.rows, 1, cv.CV_8U,
+          new Array(signal.rows).fill(0).fill(1, low, high+1));
         // Identify feasible frequency with maximum magnitude
         let result = cv.minMaxLoc(signal, bandMask);
         bandMask.delete();
         // Infer BPM
         let bpm = result.maxLoc.y * fps / signal.rows * SEC_PER_MIN;
-        print(bpm);
+        console.log(bpm);
         // TODO update UI with this result
       }
       // ...
       signal.delete();
+    }
+  }
+  getFps(timestamps, timeBase=1000) {
+    if (Array.isArray(timestamps) && timestamps.length) {
+      if (timestamps.length == 1) {
+        return DEFAULT_FPS;
+      } else {
+        let diff = timestamps[timestamps.length-1] - timestamps[0];
+        return diff/1000;
+      }
+    } else {
+      return DEFAULT_FPS;
     }
   }
   denoise(signal) {
