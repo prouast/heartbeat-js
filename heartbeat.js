@@ -1,8 +1,8 @@
 
 const RESCAN_INTERVAL = 1000;
 const RPPG_INTERVAL = 1000;
-const DEFAULT_FPS = 10;
-const WINDOW_SIZE = 5;
+const DEFAULT_FPS = 15;
+const WINDOW_SIZE = 10;
 const LOW_BPM = 42;
 const HIGH_BPM = 240;
 const REL_MIN_FACE_SIZE = 0.4;
@@ -211,16 +211,18 @@ export class Heartbeat {
       signal = this.selectGreen(signal);
       // Draw time domain signal
       this.overlayRGB.setTo([0, 0, 0, 0]);
-      this.draw(signal, 'top');
+      this.drawTime(signal);
       this.timeToFrequency(signal, true);
-      this.draw(signal, 'bottom');
       // Calculate band spectrum limits
+      console.log("fps");
+      console.log(fps);
       let low = Math.floor(signal.rows * LOW_BPM / SEC_PER_MIN / fps);
       let high = Math.ceil(signal.rows * HIGH_BPM / SEC_PER_MIN / fps);
       if (!signal.empty()) {
         // Mask for infeasible frequencies
         let bandMask = cv.matFromArray(signal.rows, 1, cv.CV_8U,
           new Array(signal.rows).fill(0).fill(1, low, high+1));
+        this.drawFrequency(signal, low, high, bandMask);
         // Identify feasible frequency with maximum magnitude
         let result = cv.minMaxLoc(signal, bandMask);
         bandMask.delete();
@@ -238,7 +240,7 @@ export class Heartbeat {
         return DEFAULT_FPS;
       } else {
         let diff = timestamps[timestamps.length-1] - timestamps[0];
-        return diff/1000;
+        return timestamps.length/diff*1000;
       }
     } else {
       return DEFAULT_FPS;
@@ -312,23 +314,39 @@ export class Heartbeat {
       cv.magnitude(planes.get(0), planes.get(1), signal);
     }
   }
-  draw(signal, pos) {
-    // display size
+  drawTime(signal) {
+    // Display size
     let displayHeight = this.face.height/2.0;
     let displayWidth = this.face.width*0.8;
     // Signal
     let result = cv.minMaxLoc(signal);
     let heightMult = displayHeight/(result.maxVal-result.minVal);
     let widthMult = displayWidth/(signal.rows-1);
-    let drawAreaTlX = this.face.x + this.face.width + 0;
+    let drawAreaTlX = this.face.x + this.face.width + 10;
     let drawAreaTlY =  this.face.y
-    if (pos == "bottom") {
-      drawAreaTlY =  this.face.y + this.face.height/2.0;
-    }
     let start = new cv.Point(drawAreaTlX,
       drawAreaTlY+(result.maxVal-signal.data32F[0])*heightMult);
     for (var i = 1; i < signal.rows; i++) {
       let end = new cv.Point(drawAreaTlX+i*widthMult,
+        drawAreaTlY+(result.maxVal-signal.data32F[i])*heightMult);
+      cv.line(this.overlayRGB, start, end, [255, 0, 0, 255], 2, cv.LINE_4, 0);
+      start = end;
+    }
+  }
+  drawFrequency(signal, low, high, bandMask) {
+    // Display size
+    let displayHeight = this.face.height/2.0;
+    let displayWidth = this.face.width*0.8;
+    // Signal
+    let result = cv.minMaxLoc(signal, bandMask);
+    let heightMult = displayHeight/(result.maxVal-result.minVal);
+    let widthMult = displayWidth/(high-low);
+    let drawAreaTlX = this.face.x + this.face.width + 10;
+    let drawAreaTlY = this.face.y + this.face.height/2.0;
+    let start = new cv.Point(drawAreaTlX,
+      drawAreaTlY+(result.maxVal-signal.data32F[low])*heightMult);
+    for (var i = low + 1; i <= high; i++) {
+      let end = new cv.Point(drawAreaTlX+(i-low)*widthMult,
         drawAreaTlY+(result.maxVal-signal.data32F[i])*heightMult);
       cv.line(this.overlayRGB, start, end, [255, 0, 0, 255], 2, cv.LINE_4, 0);
       start = end;
