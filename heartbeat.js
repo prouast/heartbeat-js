@@ -48,6 +48,7 @@ export class Heartbeat {
       };
     });
   }
+  // Create file from url
   async createFileFromUrl(path, url) {
     let request = new XMLHttpRequest();
     request.open('GET', url, true);
@@ -78,6 +79,7 @@ export class Heartbeat {
       this.frameRGB = new cv.Mat(this.webcamVideoElement.height, this.webcamVideoElement.width, cv.CV_8UC4);
       this.lastFrameRGB = new cv.Mat(this.webcamVideoElement.height, this.webcamVideoElement.width, cv.CV_8UC4);
       this.frameGray = new cv.Mat(this.webcamVideoElement.height, this.webcamVideoElement.width, cv.CV_8UC1);
+      this.overlayRGB = new cv.Mat(this.webcamVideoElement.height, this.webcamVideoElement.width, cv.CV_8UC4);
       this.cap = new cv.VideoCapture(this.webcamVideoElement);
       // Set variables
       this.signal = []; // 120 x 3 raw rgb values
@@ -149,6 +151,7 @@ export class Heartbeat {
       cv.rectangle(this.frameRGB, new cv.Point(this.face.x, this.face.y),
         new cv.Point(this.face.x+this.face.width, this.face.y+this.face.height),
         [0, 255, 0, 255]);
+      cv.add(this.frameRGB, this.overlayRGB, this.frameRGB);
       cv.imshow('canvas', this.frameRGB);
       //mask.delete();
     } catch (e) {
@@ -207,8 +210,10 @@ export class Heartbeat {
       // HR estimation
       signal = this.selectGreen(signal);
       // Draw time domain signal
-      this.draw(signal);
+      this.overlayRGB.setTo([0, 0, 0, 0]);
+      this.draw(signal, 'top');
       this.timeToFrequency(signal, true);
+      this.draw(signal, 'bottom');
       // Calculate band spectrum limits
       let low = Math.floor(signal.rows * LOW_BPM / SEC_PER_MIN / fps);
       let high = Math.ceil(signal.rows * HIGH_BPM / SEC_PER_MIN / fps);
@@ -307,8 +312,27 @@ export class Heartbeat {
       cv.magnitude(planes.get(0), planes.get(1), signal);
     }
   }
-  draw(signal) {
-    // TODO
+  draw(signal, pos) {
+    // display size
+    let displayHeight = this.face.height/2.0;
+    let displayWidth = this.face.width*0.8;
+    // Signal
+    let result = cv.minMaxLoc(signal);
+    let heightMult = displayHeight/(result.maxVal-result.minVal);
+    let widthMult = displayWidth/(signal.rows-1);
+    let drawAreaTlX = this.face.x + this.face.width + 0;
+    let drawAreaTlY =  this.face.y
+    if (pos == "bottom") {
+      drawAreaTlY =  this.face.y + this.face.height/2.0;
+    }
+    let start = new cv.Point(drawAreaTlX,
+      drawAreaTlY+(result.maxVal-signal.data32F[0])*heightMult);
+    for (var i = 1; i < signal.rows; i++) {
+      let end = new cv.Point(drawAreaTlX+i*widthMult,
+        drawAreaTlY+(result.maxVal-signal.data32F[i])*heightMult);
+      cv.line(this.overlayRGB, start, end, [255, 0, 0, 255], 2, cv.LINE_4, 0);
+      start = end;
+    }
   }
   // TODO
   stop() {
