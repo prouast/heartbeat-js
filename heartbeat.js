@@ -1,8 +1,8 @@
 
 const RESCAN_INTERVAL = 1000;
-const RPPG_INTERVAL = 1000;
-const DEFAULT_FPS = 15;
-const WINDOW_SIZE = 10;
+const RPPG_INTERVAL = 500;
+const DEFAULT_FPS = 10;
+const WINDOW_SIZE = 5;
 const LOW_BPM = 42;
 const HIGH_BPM = 240;
 const REL_MIN_FACE_SIZE = 0.4;
@@ -79,7 +79,7 @@ export class Heartbeat {
       this.frameRGB = new cv.Mat(this.webcamVideoElement.height, this.webcamVideoElement.width, cv.CV_8UC4);
       this.lastFrameRGB = new cv.Mat(this.webcamVideoElement.height, this.webcamVideoElement.width, cv.CV_8UC4);
       this.frameGray = new cv.Mat(this.webcamVideoElement.height, this.webcamVideoElement.width, cv.CV_8UC1);
-      this.overlayRGB = new cv.Mat(this.webcamVideoElement.height, this.webcamVideoElement.width, cv.CV_8UC4);
+      this.overlayMask = new cv.Mat(this.webcamVideoElement.height, this.webcamVideoElement.width, cv.CV_8UC1);
       this.cap = new cv.VideoCapture(this.webcamVideoElement);
       // Set variables
       this.signal = []; // 120 x 3 raw rgb values
@@ -101,7 +101,7 @@ export class Heartbeat {
       console.log(e);
     }
   }
-  // Add one frame to signal
+  // Add one frame to raw signal
   processFrame() {
     try {
       //if (!this.frameRGB.empty());
@@ -147,18 +147,19 @@ export class Heartbeat {
         this.timestamps.push(time);
         this.rescan.push(rescanFlag);
       }
-      // Draw
+      // Draw face
       cv.rectangle(this.frameRGB, new cv.Point(this.face.x, this.face.y),
         new cv.Point(this.face.x+this.face.width, this.face.y+this.face.height),
         [0, 255, 0, 255]);
-      cv.add(this.frameRGB, this.overlayRGB, this.frameRGB);
+      // Apply overlayMask
+      this.frameRGB.setTo([255, 0, 0, 255], this.overlayMask);
       cv.imshow('canvas', this.frameRGB);
-      //mask.delete();
     } catch (e) {
       console.log("Error capturing frame:");
       console.log(e);
     }
   }
+  // Run face classifier
   detectFace(gray) {
     let faces = new cv.RectVector();
     this.classifier.detectMultiScale(gray, faces, 1.1, 3, 0);
@@ -172,6 +173,7 @@ export class Heartbeat {
     }
     faces.delete();
   }
+  // Make ROI mask from face
   makeMask(frameGray, face) {
     let result = cv.Mat.zeros(frameGray.rows, frameGray.cols, cv.CV_8UC1);
     let white = new cv.Scalar(255, 255, 255, 255);
@@ -182,40 +184,40 @@ export class Heartbeat {
     cv.rectangle(result, pt1, pt2, white, -1);
     return result;
   }
+  // Invalidate the face
   invalidateFace() {
-    self.signal = [];
-    self.timestamps = [];
-    self.rescan = [];
-    self.face = new cv.Rect();
+    this.signal = [];
+    this.timestamps = [];
+    this.rescan = [];
+    this.overlayMask.setTo([0, 0, 0, 0]);
+    this.face = new cv.Rect();
     this.faceValid = false;
   }
+  // Track the face (TODO)
   trackFace() {
     // TODO
   }
-  // Start every second?
+  // Compute rppg signal and estimate HR
   rppg() {
-    console.log("rppg");
     // Update fps
     let fps = this.getFps(this.timestamps);
     // If valid signal is large enough: estimate
-    if (this.signal.length >= fps * WINDOW_SIZE) {
+    if (this.signal.length >= DEFAULT_FPS * WINDOW_SIZE) {
       // Work with cv.Mat from here
       let signal = cv.matFromArray(this.signal.length, 1, cv.CV_32FC3,
         [].concat.apply([], this.signal));
       // Filtering
-      //this.denoise(signal);
+      this.denoise(signal, this.rescan);
       this.standardize(signal);
       this.detrend(signal, 1);
       this.movingAverage(signal, 3);
       // HR estimation
       signal = this.selectGreen(signal);
       // Draw time domain signal
-      this.overlayRGB.setTo([0, 0, 0, 0]);
+      this.overlayMask.setTo([0, 0, 0, 0]);
       this.drawTime(signal);
       this.timeToFrequency(signal, true);
       // Calculate band spectrum limits
-      console.log("fps");
-      console.log(fps);
       let low = Math.floor(signal.rows * LOW_BPM / SEC_PER_MIN / fps);
       let high = Math.ceil(signal.rows * HIGH_BPM / SEC_PER_MIN / fps);
       if (!signal.empty()) {
@@ -232,6 +234,8 @@ export class Heartbeat {
         // TODO update UI with this result
       }
       signal.delete();
+    } else {
+      console.log("signal too small");
     }
   }
   getFps(timestamps, timeBase=1000) {
@@ -240,15 +244,36 @@ export class Heartbeat {
         return DEFAULT_FPS;
       } else {
         let diff = timestamps[timestamps.length-1] - timestamps[0];
-        return timestamps.length/diff*1000;
+        return timestamps.length/diff*timeBase;
       }
     } else {
       return DEFAULT_FPS;
     }
   }
-  denoise(signal) {
-    // TODO
+  // Remove noise from face rescanning
+  denoise(signal, rescan) {
+    let diff = new cv.Mat();
+    cv.subtract(signal.rowRange(1, signal.rows), signal.rowRange(0, signal.rows-1), diff);
+    for (var i = 1; i < signal.rows; i++) {
+      if (rescan[i] == true) {
+        let adjV = new cv.MatVector();
+        let adjR = cv.matFromArray(signal.rows, 1, cv.CV_32FC1,
+          new Array(signal.rows).fill(0).fill(diff.data32F[(i-1)*3], i, signal.rows));
+        let adjG = cv.matFromArray(signal.rows, 1, cv.CV_32FC1,
+          new Array(signal.rows).fill(0).fill(diff.data32F[(i-1)*3+1], i, signal.rows));
+        let adjB = cv.matFromArray(signal.rows, 1, cv.CV_32FC1,
+          new Array(signal.rows).fill(0).fill(diff.data32F[(i-1)*3+2], i, signal.rows));
+        adjV.push_back(adjR); adjV.push_back(adjG); adjV.push_back(adjB);
+        let adj = new cv.Mat();
+        cv.merge(adjV, adj);
+        cv.subtract(signal, adj, signal);
+        adjV.delete(); adjR.delete(); adjG.delete(); adjB.delete();
+        adj.delete();
+      }
+    }
+    diff.delete();
   }
+  // Standardize signal
   standardize(signal) {
     let mean = new cv.Mat();
     let stdDev = new cv.Mat();
@@ -266,6 +291,7 @@ export class Heartbeat {
     means_c3.delete(); stdDev_c3.delete();
     means.delete(); stdDevs.delete();
   }
+  // Remove trend in signal
   detrend(signal, lambda) {
     let h = cv.Mat.zeros(signal.rows-2, signal.rows, cv.CV_32FC1);
     let i = cv.Mat.eye(signal.rows, signal.rows, cv.CV_32FC1);
@@ -288,6 +314,7 @@ export class Heartbeat {
     t1.delete(); t2.delete(); t3.delete();
     s.delete();
   }
+  // Moving average on signal
   movingAverage(signal, kernelSize) {
     cv.blur(signal, signal, {height: kernelSize, width: 1});
   }
@@ -300,6 +327,7 @@ export class Heartbeat {
     rgb.delete();
     return result;
   }
+  // Convert from time to frequency domain
   timeToFrequency(signal, magnitude) {
     // Prepare planes
     let planes = new cv.MatVector();
@@ -329,7 +357,7 @@ export class Heartbeat {
     for (var i = 1; i < signal.rows; i++) {
       let end = new cv.Point(drawAreaTlX+i*widthMult,
         drawAreaTlY+(result.maxVal-signal.data32F[i])*heightMult);
-      cv.line(this.overlayRGB, start, end, [255, 0, 0, 255], 2, cv.LINE_4, 0);
+      cv.line(this.overlayMask, start, end, [255, 255, 255, 255], 2, cv.LINE_4, 0);
       start = end;
     }
   }
@@ -348,7 +376,7 @@ export class Heartbeat {
     for (var i = low + 1; i <= high; i++) {
       let end = new cv.Point(drawAreaTlX+(i-low)*widthMult,
         drawAreaTlY+(result.maxVal-signal.data32F[i])*heightMult);
-      cv.line(this.overlayRGB, start, end, [255, 0, 0, 255], 2, cv.LINE_4, 0);
+      cv.line(this.overlayMask, start, end, [255, 0, 0, 255], 2, cv.LINE_4, 0);
       start = end;
     }
   }
