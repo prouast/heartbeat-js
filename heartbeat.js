@@ -13,6 +13,8 @@ const MIN_CORNERS = 5;
 const QUALITY_LEVEL = 0.01;
 const MIN_DISTANCE = 25;
 
+// Heartbeat implementation in JavaScript
+// - Code could be improved given better documentation available for opencv.js
 export class Heartbeat {
   constructor(webcamId) {
     this.webcamId = webcamId;
@@ -209,8 +211,8 @@ export class Heartbeat {
       // Filtering
       this.denoise(signal, this.rescan);
       this.standardize(signal);
-      this.detrend(signal, 1);
-      this.movingAverage(signal, 3);
+      this.detrend(signal, 2);
+      this.movingAverage(signal, WINDOW_SIZE);
       // HR estimation
       signal = this.selectGreen(signal);
       // Draw time domain signal
@@ -231,6 +233,7 @@ export class Heartbeat {
         // Infer BPM
         let bpm = result.maxLoc.y * fps / signal.rows * SEC_PER_MIN;
         console.log(bpm);
+        this.drawBPM(bpm);
         // TODO update UI with this result
       }
       signal.delete();
@@ -238,6 +241,7 @@ export class Heartbeat {
       console.log("signal too small");
     }
   }
+  // Calculate fps from timestamps
   getFps(timestamps, timeBase=1000) {
     if (Array.isArray(timestamps) && timestamps.length) {
       if (timestamps.length == 1) {
@@ -342,6 +346,7 @@ export class Heartbeat {
       cv.magnitude(planes.get(0), planes.get(1), signal);
     }
   }
+  // Draw time domain signal to overlayMask
   drawTime(signal) {
     // Display size
     let displayHeight = this.face.height/2.0;
@@ -361,6 +366,7 @@ export class Heartbeat {
       start = end;
     }
   }
+  // Draw frequency domain signal to overlayMask
   drawFrequency(signal, low, high, bandMask) {
     // Display size
     let displayHeight = this.face.height/2.0;
@@ -379,6 +385,12 @@ export class Heartbeat {
       cv.line(this.overlayMask, start, end, [255, 0, 0, 255], 2, cv.LINE_4, 0);
       start = end;
     }
+  }
+  // Draw bpm string to overlayMask
+  drawBPM(bpm) {
+    cv.putText(this.overlayMask, bpm.toFixed(0).toString(),
+      new cv.Point(this.face.x, this.face.y - 10),
+      cv.FONT_HERSHEY_PLAIN, 1.5, [255, 0, 0, 255], 2);
   }
   // TODO
   stop() {
