@@ -1,25 +1,26 @@
 
 const RESCAN_INTERVAL = 1000;
-const RPPG_INTERVAL = 500;
-const DEFAULT_FPS = 10;
-const WINDOW_SIZE = 5;
+const DEFAULT_FPS = 30;
 const LOW_BPM = 42;
 const HIGH_BPM = 240;
 const REL_MIN_FACE_SIZE = 0.4;
 const SEC_PER_MIN = 60;
 const MSEC_PER_SEC = 1000;
-const MAX_CORNERS = 10;
-const MIN_CORNERS = 5;
+const MAX_CORNERS = 15;
+const MIN_CORNERS = 10;
 const QUALITY_LEVEL = 0.01;
-const MIN_DISTANCE = 25;
+const MIN_DISTANCE = 10;
 
-// Heartbeat implementation in JavaScript
+// Simple rPPG implementation in JavaScript
 // - Code could be improved given better documentation available for opencv.js
 export class Heartbeat {
-  constructor(webcamId) {
+  constructor(webcamId, targetFps, windowSize, rppgInterval) {
     this.webcamId = webcamId;
     this.streaming = false;
     this.faceValid = false;
+    this.targetFps = targetFps;
+    this.windowSize = windowSize;
+    this.rppgInterval = rppgInterval;
   }
   // Start the video stream
   async startStreaming() {
@@ -72,14 +73,14 @@ export class Heartbeat {
     });
   }
   // Initialise the demo
-  async init(resolution) {
+  async init() {
     this.webcamVideoElement = document.getElementById(this.webcamId);
     try {
       await this.startStreaming();
       this.webcamVideoElement.width = this.webcamVideoElement.videoWidth;
       this.webcamVideoElement.height = this.webcamVideoElement.videoHeight;
       this.frameRGB = new cv.Mat(this.webcamVideoElement.height, this.webcamVideoElement.width, cv.CV_8UC4);
-      this.lastFrameRGB = new cv.Mat(this.webcamVideoElement.height, this.webcamVideoElement.width, cv.CV_8UC4);
+      this.lastFrameGray = new cv.Mat(this.webcamVideoElement.height, this.webcamVideoElement.width, cv.CV_8UC1);
       this.frameGray = new cv.Mat(this.webcamVideoElement.height, this.webcamVideoElement.width, cv.CV_8UC1);
       this.overlayMask = new cv.Mat(this.webcamVideoElement.height, this.webcamVideoElement.width, cv.CV_8UC1);
       this.cap = new cv.VideoCapture(this.webcamVideoElement);
@@ -88,7 +89,6 @@ export class Heartbeat {
       this.timestamps = []; // 120 x 1 timestamps
       this.rescan = []; // 120 x 1 rescan bool
       this.face = new cv.Rect();  // Position of the face
-      // TODO: keep track of tracking corners
       // Load face detector
       this.classifier = new cv.CascadeClassifier();
       let faceCascadeFile = 'haarcascade_frontalface_default.xml';
@@ -97,8 +97,8 @@ export class Heartbeat {
         console.log("Face Cascade not loaded");
       }
       this.scanTimer = setInterval(this.processFrame.bind(this),
-        MSEC_PER_SEC/DEFAULT_FPS);
-      this.rppgTimer = setInterval(this.rppg.bind(this), RPPG_INTERVAL);
+        MSEC_PER_SEC/this.targetFps);
+      this.rppgTimer = setInterval(this.rppg.bind(this), this.rppgInterval);
     } catch (e) {
       console.log(e);
     }
@@ -106,8 +106,9 @@ export class Heartbeat {
   // Add one frame to raw signal
   processFrame() {
     try {
-      //if (!this.frameRGB.empty());
-      //  this.lastFrameRGB.setTo(this.frameRGB); // Save last frame
+      if (!this.frameGray.empty()) {
+        this.frameGray.copyTo(this.lastFrameGray); // Save last frame
+      }
       this.cap.read(this.frameRGB); // Save current frame
       let time = Date.now()
       let rescanFlag = false;
@@ -127,13 +128,13 @@ export class Heartbeat {
       }
       // Track face
       else {
-        //this.trackFace();
+        this.trackFace(this.lastFrameGray, this.frameGray);
       }
       // Update the signal
       if (this.faceValid) {
         //console.log("Update signal");
         // Shift signal buffer
-        while (this.signal.length > DEFAULT_FPS * WINDOW_SIZE) {
+        while (this.signal.length > this.targetFps * this.windowSize) {
           this.signal.shift();
           this.timestamps.shift();
           this.rescan.shift();
@@ -167,7 +168,6 @@ export class Heartbeat {
     this.classifier.detectMultiScale(gray, faces, 1.1, 3, 0);
     if (faces.size() > 0) {
       this.face = faces.get(0);
-      // TODO: Detect tracking corners
       this.faceValid = true;
     } else {
       console.log("No faces");
@@ -194,25 +194,97 @@ export class Heartbeat {
     this.overlayMask.setTo([0, 0, 0, 0]);
     this.face = new cv.Rect();
     this.faceValid = false;
+    this.corners = [];
   }
-  // Track the face (TODO)
-  trackFace() {
-    // TODO
+  // Track the face
+  trackFace(lastFrameGray, frameGray) {
+    // If not available, detect some good corners to track within face
+    let trackingMask = cv.Mat.zeros(frameGray.rows, frameGray.cols, cv.CV_8UC1);
+    let squarePointData = new Uint8Array([
+      this.face.x + 0.22 * this.face.width, this.face.y + 0.21 * this.face.height,
+      this.face.x + 0.78 * this.face.width, this.face.y + 0.21 * this.face.height,
+      this.face.x + 0.70 * this.face.width, this.face.y + 0.65 * this.face.height,
+      this.face.x + 0.30 * this.face.width, this.face.y + 0.65 * this.face.height]);
+    let squarePoints = cv.matFromArray(4, 1, cv.CV_32SC2, squarePointData);
+    let pts = new cv.MatVector();
+    let corners = new cv.Mat();
+    pts.push_back(squarePoints);
+    cv.fillPoly(trackingMask, pts, [255, 255, 255, 255]);
+    cv.goodFeaturesToTrack(lastFrameGray, corners, MAX_CORNERS,
+      QUALITY_LEVEL, MIN_DISTANCE, trackingMask, 3);
+    trackingMask.delete(); squarePoints.delete(); pts.delete();
+
+    // Calculate optical flow
+    let corners_1 = new cv.Mat();
+    let st = new cv.Mat();
+    let err = new cv.Mat();
+    let winSize = new cv.Size(15, 15);
+    let maxLevel = 2;
+    let criteria = new cv.TermCriteria(
+      cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 10, 0.03);
+    cv.calcOpticalFlowPyrLK(lastFrameGray, frameGray, corners, corners_1,
+      st, err, winSize, maxLevel, criteria);
+
+    // Backtrack once
+    let corners_0 = new cv.Mat();
+    cv.calcOpticalFlowPyrLK(frameGray, lastFrameGray, corners_1, corners_0,
+      st, err, winSize, maxLevel, criteria);
+    // TODO exclude unmatched corners
+
+    // Clean up
+    st.delete(); err.delete();
+
+    if (corners_1.rows >= MIN_CORNERS) {
+      // Estimate affine transform
+      const [s, tx, ty] = this.estimateAffineTransform(corners_0, corners_1);
+      // Apply affine transform
+      this.face = new cv.Rect(
+        this.face.x * s + tx, this.face.y * s + ty,
+        this.face.width * s, this.face.height * s);
+    } else {
+      this.invalidateFace();
+    }
+
+    corners.delete(); corners_1.delete(); corners_0.delete();
+  }
+  // For some reason this is not available in opencv.js, so implemented it
+  estimateAffineTransform(corners_0, corners_1) {
+    // Construct X and Y matrix
+    let t_x = cv.matFromArray(corners_0.rows*2, 1, cv.CV_32FC1,
+      Array.from(corners_0.data32F));
+    let y = cv.matFromArray(corners_1.rows*2, 1, cv.CV_32FC1,
+      Array.from(corners_1.data32F));
+    let x = new cv.Mat(corners_0.rows*2, 3, cv.CV_32FC1);
+    let t_10 = new cv.Mat(); let t_01 = new cv.Mat();
+    cv.repeat(cv.matFromArray(2, 1, cv.CV_32FC1, [1, 0]), corners_0.rows, 1, t_10);
+    cv.repeat(cv.matFromArray(2, 1, cv.CV_32FC1, [0, 1]), corners_0.rows, 1, t_01);
+    t_x.copyTo(x.col(0));
+    t_10.copyTo(x.col(1));
+    t_01.copyTo(x.col(2));
+
+    // Solve
+    let res = cv.Mat.zeros(3, 1, cv.CV_32FC1);
+    cv.solve(x, y, res, cv.DECOMP_SVD);
+
+    // Clean up
+    t_01.delete(); t_10.delete(); x.delete(); t_x.delete(); y.delete();
+
+    return [res.data32F[0], res.data32F[1], res.data32F[2]];
   }
   // Compute rppg signal and estimate HR
   rppg() {
     // Update fps
     let fps = this.getFps(this.timestamps);
     // If valid signal is large enough: estimate
-    if (this.signal.length >= DEFAULT_FPS * WINDOW_SIZE) {
+    if (this.signal.length >= this.targetFps * this.windowSize) {
       // Work with cv.Mat from here
       let signal = cv.matFromArray(this.signal.length, 1, cv.CV_32FC3,
         [].concat.apply([], this.signal));
       // Filtering
       this.denoise(signal, this.rescan);
       this.standardize(signal);
-      this.detrend(signal, 2);
-      this.movingAverage(signal, WINDOW_SIZE);
+      this.detrend(signal, fps);
+      this.movingAverage(signal, 3, Math.max(Math.floor(fps/6), 2));
       // HR estimation
       signal = this.selectGreen(signal);
       // Draw time domain signal
@@ -233,8 +305,8 @@ export class Heartbeat {
         // Infer BPM
         let bpm = result.maxLoc.y * fps / signal.rows * SEC_PER_MIN;
         console.log(bpm);
+        // Draw BPM
         this.drawBPM(bpm);
-        // TODO update UI with this result
       }
       signal.delete();
     } else {
@@ -319,8 +391,10 @@ export class Heartbeat {
     s.delete();
   }
   // Moving average on signal
-  movingAverage(signal, kernelSize) {
-    cv.blur(signal, signal, {height: kernelSize, width: 1});
+  movingAverage(signal, n, kernelSize) {
+    for (var i = 0; i < n; i++) {
+      cv.blur(signal, signal, {height: kernelSize, width: 1});
+    }
   }
   // TODO solve this more elegantly
   selectGreen(signal) {
@@ -386,6 +460,17 @@ export class Heartbeat {
       start = end;
     }
   }
+  // Draw tracking corners
+  drawCorners(corners) {
+    for (var i = 0; i < corners.rows; i++) {
+      cv.circle(this.frameRGB, new cv.Point(
+        corners.data32F[i*2], corners.data32F[i*2+1]),
+        5, [0, 255, 0, 255], -1);
+      //circle(frameRGB, corners[i], r, WHITE, -1, 8, 0);
+      //line(frameRGB, Point(corners[i].x-5,corners[i].y), Point(corners[i].x+5,corners[i].y), GREEN, 1);
+      //line(frameRGB, Point(corners[i].x,corners[i].y-5), Point(corners[i].x,corners[i].y+5), GREEN, 1);
+    }
+  }
   // Draw bpm string to overlayMask
   drawBPM(bpm) {
     cv.putText(this.overlayMask, bpm.toFixed(0).toString(),
@@ -395,15 +480,14 @@ export class Heartbeat {
   // TODO
   stop() {
     console.log("stop" + this.timer);
-    clearInterval(this.timer);
+    clearInterval(this.rppgTimer);
+    clearInterval(this.scanTimer);
+    this.frameRGB.delete();
+    this.lastFrameRGB.delete();
+    this.frameGray.delete();
+    this.overlayMask.delete();
+    this.faceHist.delete();
 
-    this.classifier.delete();
-    this.face.delete();
-    //delete this.timer;
-    //this.frame.delete();
-    //delete this.frame;
-    //this.dst.delete();
-    //delete this.dst;
     if (this.webcam) {
       this.webcamVideoElement.pause();
       this.webcamVideoElement.srcObject = null;
