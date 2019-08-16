@@ -9,10 +9,10 @@ Here's how it works:
   - Signal series is obtained by determining the facial color in every frame
   - Heart rate is estimated using frequency analysis and filtering of the series
 
-If you are interested in the specifics, feel free to have a read of our publications on the topic:
-  - [Remote Photoplethysmography: Evaluation of Contactless Heart Rate Measurement in an Information Systems Setting][aitic]
-  - [Using Contactless Heart Rate Measurements for Real-Time Assessment of Affective States][gmunden]
-  - [Remote heart rate measurement using low-cost RGB face video: A technical literature review][fcs]
+If you are interested in the specifics, feel free to have a read of my publications on the topic:
+  - [Remote Photoplethysmography: Evaluation of Contactless Heart Rate Measurement in an Information Systems Setting](http://air.newcastle.edu.au/AITIC_files/Paper_40.pdf)
+  - [Using Contactless Heart Rate Measurements for Real-Time Assessment of Affective States](http://link.springer.com/chapter/10.1007/978-3-319-41402-7_20)
+  - [Remote heart rate measurement using low-cost RGB face video: A technical literature review](https://www.researchgate.net/profile/Raymond_Chiong/publication/306285292_Remote_heart_rate_measurement_using_low-cost_RGB_face_video_A_technical_literature_review/links/58098ac808ae1c98c252637d.pdf)
 
 ## Demo
 
