@@ -6,8 +6,8 @@ const HIGH_BPM = 240;
 const REL_MIN_FACE_SIZE = 0.4;
 const SEC_PER_MIN = 60;
 const MSEC_PER_SEC = 1000;
-const MAX_CORNERS = 15;
-const MIN_CORNERS = 10;
+const MAX_CORNERS = 10;
+const MIN_CORNERS = 5;
 const QUALITY_LEVEL = 0.01;
 const MIN_DISTANCE = 10;
 
@@ -63,7 +63,6 @@ export class Heartbeat {
           if (request.status === 200) {
             let data = new Uint8Array(request.response);
             cv.FS_createDataFile('/', path, data, true, false, false);
-            console.log("loady load");
             resolve();
           } else {
             console.log('Failed to load ' + url + ' status: ' + request.status);
@@ -91,7 +90,7 @@ export class Heartbeat {
       this.face = new cv.Rect();  // Position of the face
       // Load face detector
       this.classifier = new cv.CascadeClassifier();
-      let faceCascadeFile = 'haarcascade_frontalface_default.xml';
+      let faceCascadeFile = 'haarcascade_frontalface_alt.xml';
       await this.createFileFromUrl(faceCascadeFile, faceCascadeFile);
       if (!this.classifier.load(faceCascadeFile)) {
         console.log("Face Cascade not loaded");
@@ -115,24 +114,22 @@ export class Heartbeat {
       cv.cvtColor(this.frameRGB, this.frameGray, cv.COLOR_RGBA2GRAY);
       // Need to find the face
       if (!this.faceValid) {
-        //console.log("Face scan");
         this.lastScanTime = time;
         this.detectFace(this.frameGray);
       }
       // Scheduled face rescan
       else if (time - this.lastScanTime >= RESCAN_INTERVAL) {
-        //console.log("Face rescan");
         this.lastScanTime = time
         this.detectFace(this.frameGray);
         rescanFlag = true;
       }
       // Track face
       else {
-        this.trackFace(this.lastFrameGray, this.frameGray);
+        // Disable for now,
+        //this.trackFace(this.lastFrameGray, this.frameGray);
       }
       // Update the signal
       if (this.faceValid) {
-        //console.log("Update signal");
         // Shift signal buffer
         while (this.signal.length > this.targetFps * this.windowSize) {
           this.signal.shift();
