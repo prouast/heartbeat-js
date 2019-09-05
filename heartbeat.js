@@ -1,4 +1,3 @@
-
 const RESCAN_INTERVAL = 1000;
 const DEFAULT_FPS = 30;
 const LOW_BPM = 42;
@@ -14,8 +13,10 @@ const MIN_DISTANCE = 10;
 // Simple rPPG implementation in JavaScript
 // - Code could be improved given better documentation available for opencv.js
 export class Heartbeat {
-  constructor(webcamId, targetFps, windowSize, rppgInterval) {
+  constructor(webcamId, canvasId, classifierPath, targetFps, windowSize, rppgInterval) {
     this.webcamId = webcamId;
+    this.canvasId = canvasId,
+    this.classifierPath = classifierPath;
     this.streaming = false;
     this.faceValid = false;
     this.targetFps = targetFps;
@@ -90,10 +91,10 @@ export class Heartbeat {
       this.face = new cv.Rect();  // Position of the face
       // Load face detector
       this.classifier = new cv.CascadeClassifier();
-      let faceCascadeFile = 'haarcascade_frontalface_alt.xml';
-      await this.createFileFromUrl(faceCascadeFile, faceCascadeFile);
+      let faceCascadeFile = "haarcascade_frontalface_alt.xml";
       if (!this.classifier.load(faceCascadeFile)) {
-        console.log("Face Cascade not loaded");
+        await this.createFileFromUrl(faceCascadeFile, this.classifierPath);
+        this.classifier.load(faceCascadeFile)
       }
       this.scanTimer = setInterval(this.processFrame.bind(this),
         MSEC_PER_SEC/this.targetFps);
@@ -153,7 +154,7 @@ export class Heartbeat {
         [0, 255, 0, 255]);
       // Apply overlayMask
       this.frameRGB.setTo([255, 0, 0, 255], this.overlayMask);
-      cv.imshow('canvas', this.frameRGB);
+      cv.imshow(this.canvasId, this.frameRGB);
     } catch (e) {
       console.log("Error capturing frame:");
       console.log(e);
@@ -474,17 +475,10 @@ export class Heartbeat {
       new cv.Point(this.face.x, this.face.y - 10),
       cv.FONT_HERSHEY_PLAIN, 1.5, [255, 0, 0, 255], 2);
   }
-  // TODO
+  // Clean up resources
   stop() {
-    console.log("stop" + this.timer);
     clearInterval(this.rppgTimer);
     clearInterval(this.scanTimer);
-    this.frameRGB.delete();
-    this.lastFrameRGB.delete();
-    this.frameGray.delete();
-    this.overlayMask.delete();
-    this.faceHist.delete();
-
     if (this.webcam) {
       this.webcamVideoElement.pause();
       this.webcamVideoElement.srcObject = null;
@@ -492,6 +486,11 @@ export class Heartbeat {
     if (this.stream) {
       this.stream.getVideoTracks()[0].stop();
     }
+    this.invalidateFace();
     this.streaming = false;
+    this.frameRGB.delete();
+    this.lastFrameGray.delete();
+    this.frameGray.delete();
+    this.overlayMask.delete();
   }
 }
