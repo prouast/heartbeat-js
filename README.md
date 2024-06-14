@@ -1,5 +1,7 @@
 # heartbeat-js: Video-based pulse rate monitoring in JavaScript
 
+**News: Try out [VitalLens](https://apps.apple.com/us/app/vitallens/id6472757649), my new free iOS app implementing a modern rPPG model based on AI. We also have an [API](https://www.rouast.com/api/) with a [Python Client](https://github.com/Rouast-Labs/vitallens-python) which uses the same AI model. Find out more at [https://www.rouast.com/vitallens](https://www.rouast.com/vitallens/) and [https://www.rouast.com/api](https://www.rouast.com/api/).**
+
 This is a simple JavaScript implementation of rPPG, a way to measure the pulse rate without skin contact.
 It uses a live feed of the face to analyse subtle changes in skin color.
 
