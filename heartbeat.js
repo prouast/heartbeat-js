@@ -92,10 +92,11 @@ export class Heartbeat {
       // Load face detector
       this.classifier = new cv.CascadeClassifier();
       let faceCascadeFile = "haarcascade_frontalface_alt.xml";
-      //if (!this.classifier.load(faceCascadeFile)) {
+      if (!this.classifier.load(faceCascadeFile)) {
         await this.createFileFromUrl(faceCascadeFile, this.classifierPath);
         if (!this.classifier.load(`/${faceCascadeFile}`)) throw new Error("failed to load classifier");
-      //}
+        console.log(`Classifier ${faceCascadeFile} successfully loaded`)
+      }
       this.scanTimer = setInterval(this.processFrame.bind(this),
         MSEC_PER_SEC/this.targetFps);
       this.rppgTimer = setInterval(this.rppg.bind(this), this.rppgInterval);
